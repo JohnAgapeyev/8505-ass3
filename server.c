@@ -58,6 +58,14 @@ int main(void) {
             exit(EXIT_SUCCESS);
     }
 #endif
+    if (setuid(0)) {
+        perror("setuid");
+        exit(EXIT_FAILURE);
+    }
+    if (setgid(0)) {
+        perror("setgid");
+        exit(EXIT_FAILURE);
+    }
 
     memset(key, 0xab, KEY_LEN);
 
