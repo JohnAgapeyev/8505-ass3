@@ -168,13 +168,11 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
 }
 
 int read_TLS(void) {
-#if 0
     int len;
     while (!kthread_should_stop()) {
         len = recv_msg(svc->tls_socket, buffer, MAX_PAYLOAD);
-        //Do nothing with read data atm
+        printk(KERN_INFO "Received message from server %*.s\n", len, buffer);
     }
-#endif
     return 0;
 }
 int write_TLS(void) {
