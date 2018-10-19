@@ -102,6 +102,7 @@ int main(void) {
     switch (fork()) {
         case 0: {
             setvbuf(stdin, NULL, _IONBF, 0);
+            setvbuf(stdout, NULL, _IONBF, 0);
             for (;;) {
                 int size = read(STDIN_FILENO, buffer, MAX_PAYLOAD);
                 if (size < 0) {
@@ -109,6 +110,7 @@ int main(void) {
                     break;
                 }
                 if (size == 0) {
+                    printf("Read zero\n");
                     break;
                 }
                 SSL_write(ssl, buffer, size);
@@ -119,14 +121,36 @@ int main(void) {
             exit(EXIT_FAILURE);
         default: {
             int size;
-            while ((size = SSL_read(ssl, buffer, MAX_PAYLOAD)) > 0) {
-                for (int i = 0; i < size; ++i) {
-                    printf("%c", buffer[i]);
-                }
+            while (1) {
+                //if (SSL_has_pending(ssl)) {
+                    size = SSL_read(ssl, buffer, MAX_PAYLOAD);
+                    if (size <= 0) {
+                        break;
+                    }
+                    printf("SSL Read %d\n", size);
+                    for (int i = 0; i < size; ++i) {
+                        printf("%c", buffer[i]);
+                    }
+                    fflush(stdout);
+                //}
+            }
+            printf("SSL Read %d\n", size);
+            if (size < 0) {
+                printf("err %d\n", SSL_get_error(ssl, size));
+                //printf("err2 %d\n", ERR_get_error());
+                printf("err3 %s\n", ERR_error_string(ERR_get_error(), NULL));
+                ERR_GET_REASON(ERR_get_error());
+                printf("%d\n", SSL_ERROR_WANT_READ);
+                printf("%d\n", SSL_ERROR_ZERO_RETURN);
+                printf("%d\n", SSL_ERROR_NONE);
+                printf("%d\n", SSL_ERROR_WANT_WRITE);
+                printf("%d\n", SSL_ERROR_SYSCALL);
+                printf("%d\n", SSL_ERROR_SSL);
             }
         } break;
     }
     setvbuf(stdin, NULL, _IOLBF, 0);
+    setvbuf(stdout, NULL, _IOLBF, 0);
 
     SSL_free(ssl);
 

