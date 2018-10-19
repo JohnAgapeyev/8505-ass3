@@ -252,16 +252,21 @@ int main(int argc, char** argv) {
                     fprintf(stderr, "Sock error\n");
                     close(eventList[i].data.fd);
                 } else if (eventList[i].events & EPOLLIN) {
-                    int size = read(eventList[i].data.fd, buffer, MAX_PAYLOAD);
-                    printf("Read %d bytes\n", size);
-                    if (size < 0) {
-                        perror("read");
-                        goto done;
-                    } else if (size == 0) {
+                    int size;
+                    while ((size = read(eventList[i].data.fd, buffer, MAX_PAYLOAD)) > 0) {
+                        printf("Read %d bytes\n", size);
+                        printf("Wrote %d bytes to server\n", size);
+                        SSL_write(ssl, buffer, size);
+                    }
+                    if (size == 0) {
                         goto done;
                     }
-                    printf("Wrote %d bytes to server\n", size);
-                    SSL_write(ssl, buffer, size);
+                    if (size == -1) {
+                        if (errno != EAGAIN) {
+                            perror("read");
+                            goto done;
+                        }
+                    }
                 }
             }
         }

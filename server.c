@@ -125,34 +125,19 @@ int main(void) {
             exit(EXIT_FAILURE);
         default: {
             int size;
-            while (1) {
-                //if (SSL_has_pending(ssl)) {
-                    size = SSL_read(ssl, buffer, MAX_PAYLOAD);
-                    if (size <= 0) {
-                        break;
-                    }
-                    printf("SSL Read %d\n", size);
-                    for (int i = 0; i < size; ++i) {
-                        printf("%c", buffer[i]);
-                    }
-                    fflush(stdout);
-                //}
+            while ((size = SSL_read(ssl, buffer, MAX_PAYLOAD)) > 0) {
+                for (int i = 0; i < size; ++i) {
+                    printf("%c", buffer[i]);
+                }
+                fflush(stdout);
             }
-            printf("SSL Read %d\n", size);
             if (size < 0) {
-                printf("err %d\n", SSL_get_error(ssl, size));
-                //printf("err2 %d\n", ERR_get_error());
+                printf("err1 %d\n", SSL_get_error(ssl, size));
                 long e = ERR_get_error();
-                printf("err3 %s\n", ERR_error_string(e, NULL));
-                printf("err4 %s\n", ERR_lib_error_string(e));
-                printf("err5 %s\n", ERR_func_error_string(e));
-                printf("err6 %s\n", ERR_reason_error_string(e));
-                printf("%d\n", SSL_ERROR_WANT_READ);
-                printf("%d\n", SSL_ERROR_ZERO_RETURN);
-                printf("%d\n", SSL_ERROR_NONE);
-                printf("%d\n", SSL_ERROR_WANT_WRITE);
-                printf("%d\n", SSL_ERROR_SYSCALL);
-                printf("%d\n", SSL_ERROR_SSL);
+                printf("err2 %s\n", ERR_error_string(e, NULL));
+                printf("err3 %s\n", ERR_lib_error_string(e));
+                printf("err4 %s\n", ERR_func_error_string(e));
+                printf("err5 %s\n", ERR_reason_error_string(e));
             }
         } break;
     }

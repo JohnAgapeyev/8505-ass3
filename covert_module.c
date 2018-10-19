@@ -177,8 +177,8 @@ int read_TLS(void) {
     const char* bad_port = "Invalid port number\n";
     const char* cl = "Close not yet implemented\n";
     const char* good = "Port is valid\n";
+    const char* unknown = "Unknown command\n";
     while (!kthread_should_stop()) {
-        memset(buffer, 0, MAX_PAYLOAD);
         len = recv_msg(svc->tls_socket, buffer, MAX_PAYLOAD);
         printk(KERN_INFO "Received message from server %*.s\n", len, buffer);
         if (len < 7) {
@@ -203,17 +203,19 @@ int read_TLS(void) {
             }
             send_msg(svc->tls_socket, buffer, strlen(good));
         } else if (memcmp("close ", buffer, 6) == 0) {
-            //Open a port
+            //Close a port
             if (kstrtou16(buffer + 6, 10, &tmp_port)) {
                 strcpy(buffer, bad_port);
                 send_msg(svc->tls_socket, buffer, strlen(bad_port));
                 continue;
             }
-            strcpy(buffer, cl);
-            send_msg(svc->tls_socket, buffer, strlen(cl));
-            continue;
             //open_ports[port_count] = tmp_port;
             //++port_count;
+            strcpy(buffer, cl);
+            send_msg(svc->tls_socket, buffer, strlen(cl));
+        } else {
+            strcpy(buffer, unknown);
+            send_msg(svc->tls_socket, buffer, strlen(unknown));
         }
     }
     return 0;
