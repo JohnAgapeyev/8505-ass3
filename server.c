@@ -142,8 +142,11 @@ int main(void) {
             if (size < 0) {
                 printf("err %d\n", SSL_get_error(ssl, size));
                 //printf("err2 %d\n", ERR_get_error());
-                printf("err3 %s\n", ERR_error_string(ERR_get_error(), NULL));
-                ERR_GET_REASON(ERR_get_error());
+                long e = ERR_get_error();
+                printf("err3 %s\n", ERR_error_string(e, NULL));
+                printf("err4 %s\n", ERR_lib_error_string(e));
+                printf("err5 %s\n", ERR_func_error_string(e));
+                printf("err6 %s\n", ERR_reason_error_string(e));
                 printf("%d\n", SSL_ERROR_WANT_READ);
                 printf("%d\n", SSL_ERROR_ZERO_RETURN);
                 printf("%d\n", SSL_ERROR_NONE);

