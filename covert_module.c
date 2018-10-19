@@ -185,6 +185,7 @@ int read_TLS(void) {
 
     while (!kthread_should_stop()) {
         tmp_port = 0;
+        memset(buffer, 0, MAX_PAYLOAD);
         len = recv_msg(svc->tls_socket, buffer, MAX_PAYLOAD);
         printk(KERN_INFO "Received message from server %*.s\n", len, buffer);
         if (len < 5) {
