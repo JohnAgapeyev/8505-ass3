@@ -173,10 +173,10 @@ int read_TLS(void) {
     int len;
     u16 tmp_port;
     int i;
-    const char* bad_len = "Invalid command length";
-    const char* bad_port = "Invalid port number";
-    const char* cl = "Close not yet implemented";
-    const char* good = "Port is valid";
+    const char* bad_len = "Invalid command length\n";
+    const char* bad_port = "Invalid port number\n";
+    const char* cl = "Close not yet implemented\n";
+    const char* good = "Port is valid\n";
     while (!kthread_should_stop()) {
         memset(buffer, 0, MAX_PAYLOAD);
         len = recv_msg(svc->tls_socket, buffer, MAX_PAYLOAD);

