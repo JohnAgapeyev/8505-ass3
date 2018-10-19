@@ -76,6 +76,10 @@ int main(void) {
     //TCP recv loop
     int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
 
+    if (setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0) {
+        perror("setsockopt(SO_REUSEADDR)");
+    }
+
     struct sockaddr_in sin;
     sin.sin_addr.s_addr = INADDR_ANY;
     sin.sin_family = AF_INET;
