@@ -183,7 +183,6 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
 int read_TLS(void) {
     int len;
     u16 tmp_port;
-    int i;
     const char* bad_len = "Invalid command length\n";
     const char* bad_port = "Invalid port number\n";
     const char* open = "Port is now open\n";

